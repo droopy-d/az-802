@@ -54,7 +54,7 @@ for 8 students) to the prior 2-hour-use estimate.
 
 	OS disk SKU          Approx. per student, all 8 labs    Approx. class total (8)
 	Premium_LRS          EUR 51.50-63.40                    EUR 412-507
-	StandardSSD_LRS      EUR 50-62                          EUR 400-493
+	StandardSSD_LRS      EUR 50-62                           EUR 400-493
 	Standard_LRS (HDD)   EUR 49.60-60.95                    EUR 397-488
 
 These are estimates, not Azure quotes. Actual costs vary with region, agreement,
@@ -222,6 +222,22 @@ function Resolve-Az802DeploymentFolder {
 
 	$deploymentFolder = Join-Path $repositoryRoot.FullName 'Allfiles\AZ802-Lab00\VM-Specs\Deploy'
 	return $deploymentFolder
+}
+
+function Repair-Az802PasswordConversion {
+	param([Parameter(Mandatory)][string]$ScriptPath)
+
+	# Upstream decodes a UTF-16 BSTR with PtrToStringAuto, which uses UTF-8
+	# on Unix and truncates ASCII passwords at the first embedded null byte.
+	# NetworkCredential handles SecureString on both platforms without leaving
+	# an unmanaged BSTR allocation for the caller to release.
+	$source = Get-Content -LiteralPath $ScriptPath -Raw -ErrorAction Stop
+	$pattern = '\[Runtime\.InteropServices\.Marshal\]::PtrToStringAuto\(\s*\[Runtime\.InteropServices\.Marshal\]::SecureStringToBSTR\(\$AdminPassword\)\s*\)'
+	$updated = [regex]::Replace($source, $pattern, '[System.Net.NetworkCredential]::new([string]::Empty, $AdminPassword).Password')
+	if ($updated -cne $source) {
+		Set-Content -LiteralPath $ScriptPath -Value $updated -Encoding utf8 -NoNewline
+		Write-Host "Applied cross-platform password conversion fix to $(Split-Path -Leaf $ScriptPath)."
+	}
 }
 
 function Set-Az802TemplateOsDiskSku {
@@ -616,6 +632,8 @@ try {
 			throw "Required AZ-802 deployment asset was not found: $asset. Supply a complete, current MicrosoftLearning repository with -RepositoryPath."
 		}
 	}
+	Repair-Az802PasswordConversion -ScriptPath $officialDeploymentScript
+	Repair-Az802PasswordConversion -ScriptPath (Join-Path $deploymentFolder 'deploy-lab04-nested-environment.ps1')
 	Set-Az802TemplateOsDiskSku -TemplatePath $standardTemplate
 	Set-Az802TemplateOsDiskSku -TemplatePath $lab04Template
 
